@@ -99,7 +99,7 @@ if not speech_client:
 # --- Firebase Service Account Key Handling (using st.secrets) ---
 FIREBASE_SERVICE_ACCOUNT_KEY_PATH: Optional[str] = None
 # Get JSON string from Streamlit secrets
-firebase_sa_key_json_str: Optional[str] = st.secrets.get("FIREBASE_SERVICE_ACCOUNT_KEY_JSON")
+firebase_sa_key_json_str: Optional[str] = st.secrets.get("FIREBASE_SERVICE_ACCOUNT_KEY")
 
 should_initialize_firebase = True
 
