@@ -50,7 +50,7 @@ def create_temp_json_file(json_content: str, prefix: str) -> Optional[str]:
 # --- Google Cloud Credentials Handling (using st.secrets) ---
 GOOGLE_CLOUD_KEY_PATH: Optional[str] = None
 # Get JSON string from Streamlit secrets
-gcp_sa_key_json_str: Optional[str] = st.secrets.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+gcp_sa_key_json_str: Optional[str] = st.secrets.get("GOOGLE_APPLICATION_CREDENTIALS")
 
 if not gcp_sa_key_json_str:
     st.error("Secret 'GOOGLE_APPLICATION_CREDENTIALS_JSON' not found. Please add your Google Service Account JSON content to your Streamlit secrets.")
