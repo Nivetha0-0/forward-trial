@@ -37,7 +37,6 @@ if not SUPPORTED_LANGUAGES:
     SUPPORTED_LANGUAGES = get_supported_languages(translator_client, allowed_langs=ALLOWED_LANGUAGES)
 
 def cosine_similarity_manual(vec1, vec2):
-    """Calculates cosine similarity between two vectors."""
     vec1 = np.array(vec1)
     vec2 = np.array(vec2)
     dot_product = np.dot(vec1, vec2)
@@ -81,7 +80,6 @@ Return only the category name: 'Animal Bite-Related' or 'Not Animal Bite-Related
         description="The classified category regarding animal bite relevance."
     )
 
-# Initialize OpenAI with Streamlit secrets
 openai_api_key_secret = SecretStr(st.secrets["OPENAI_KEY"])
 
 embeddings_model = OpenAIEmbeddings(model="text-embedding-3-large", api_key=openai_api_key_secret)
@@ -89,7 +87,6 @@ llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0, api_key=openai_api_k
 smaller_llm = ChatOpenAI(temperature=0, model="gpt-4o-mini", api_key=openai_api_key_secret)
 larger_llm = ChatOpenAI(temperature=0, model="gpt-4o", api_key=openai_api_key_secret)
 
-# Initialize MongoDB with Streamlit secrets
 try:
     client = MongoClient(st.secrets["MONGODB_URI"])
     db = client["pdf_file"]
