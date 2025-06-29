@@ -1,15 +1,12 @@
 import streamlit as st
 from streamlit_chat import message
+import streamlit as st
+from streamlit_chat import message
 import os
 import numpy as np
 import hashlib
 import json
-import datetime
-import tempfile # Essential for handling JSON string to file path conversion
-
-# No longer loading dotenv, as we're using st.secrets
-# from dotenv import load_dotenv
-# load_dotenv()
+import tempfile
 
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI
@@ -20,118 +17,83 @@ from typing import Literal, Optional, List, cast
 from google.cloud import translate
 from google.cloud import texttospeech
 from google.cloud import speech
-
-# Assuming tran_works.py and forwarding_works.py are in the same directory or accessible in PYTHONPATH
 from tran_works import get_translator_client, get_texttospeech_client, get_speech_client, translate_text, get_supported_languages
-from forwarding_works import initialize_firebase_app, save_unanswered_question, save_user_interaction # type: ignore
 
+# Remove dotenv import and load_dotenv() call
+# from dotenv import load_dotenv
+# load_dotenv()
 
-# --- Function to create temporary JSON file from string ---
-def create_temp_json_file(json_content: str, prefix: str) -> Optional[str]:
-    """
-    Creates a temporary JSON file from a JSON string and returns its path.
-    Returns None if content is invalid or an error occurs.
-    """
-    try:
-        # Validate JSON content first
-        json.loads(json_content)
-        # Use tempfile to create a secure temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8', prefix=prefix) as temp_file:
-            temp_file.write(json_content)
-        return temp_file.name
-    except json.JSONDecodeError as e:
-        st.error(f"Error decoding JSON content for {prefix} credentials: {e}. Please check your secrets.")
-        return None
-    except Exception as e:
-        st.error(f"Error creating temporary file for {prefix} credentials: {e}.")
-        return None
+GOOGLE_CLOUD_KEY_PATH: Optional[str] = None 
 
-
-# --- Google Cloud Credentials Handling (using st.secrets) ---
-GOOGLE_CLOUD_KEY_PATH: Optional[str] = None
-# Get JSON string from Streamlit secrets
-gcp_sa_key_json_str: Optional[str] = st.secrets.get("GOOGLE_APPLICATION_CREDENTIALS")
-
-if not gcp_sa_key_json_str:
-    st.error("Secret 'GOOGLE_APPLICATION_CREDENTIALS_JSON' not found. Please add your Google Service Account JSON content to your Streamlit secrets.")
-    st.stop()
-
-# Create a temporary file from the JSON string
-temp_gcp_key_path = create_temp_json_file(gcp_sa_key_json_str, "gcp_key_")
-
-if not temp_gcp_key_path:
-    st.stop() # Error already reported by create_temp_json_file
-
-# Set the GOOGLE_APPLICATION_CREDENTIALS environment variable to the path of the temporary file
-# Google Cloud libraries will automatically pick this up.
+# Get the Google Cloud credentials from Streamlit secrets
 try:
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_gcp_key_path
-    GOOGLE_CLOUD_KEY_PATH = temp_gcp_key_path # Assign the path for your get_translator_client etc.
+    # Check if GOOGLE_APPLICATION_CREDENTIALS path is provided in secrets
+    if "GOOGLE_APPLICATION_CREDENTIALS" in st.secrets:
+        gcp_key_file_path = st.secrets["GOOGLE_APPLICATION_CREDENTIALS"]
+        
+        if not os.path.exists(gcp_key_file_path):
+            st.error(f"Google Cloud credentials file not found at: {gcp_key_file_path}")
+            st.stop()
+        
+        # Read the JSON file content
+        with open(gcp_key_file_path, 'r') as file:
+            gcp_sa_key_json_content = file.read()
+        
+        # Create a temporary file with the JSON content
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
+            temp_file.write(gcp_sa_key_json_content)
+            temp_file.flush() 
+            GOOGLE_CLOUD_KEY_PATH = temp_file.name
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_CLOUD_KEY_PATH
+    
+    # Check if Firebase service account key is provided (alternative)
+    elif "FIREBASE_SERVICE_ACCOUNT_KEY" in st.secrets:
+        firebase_sa_key_json_content = st.secrets["FIREBASE_SERVICE_ACCOUNT_KEY"]
+        
+        # Create a temporary file with the JSON content
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
+            # If it's stored as a string, use it directly
+            if isinstance(firebase_sa_key_json_content, str):
+                temp_file.write(firebase_sa_key_json_content)
+            else:
+                # If it's stored as a dict/object, convert to JSON string
+                temp_file.write(json.dumps(firebase_sa_key_json_content))
+            temp_file.flush() 
+            GOOGLE_CLOUD_KEY_PATH = temp_file.name
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_CLOUD_KEY_PATH
+    
+    else:
+        st.error("Google Cloud credentials not found in Streamlit secrets. Please add either 'GOOGLE_APPLICATION_CREDENTIALS' (file path) or 'FIREBASE_SERVICE_ACCOUNT_KEY' (JSON content) to your secrets.toml file.")
+        st.stop()
+
 except Exception as e:
-    st.error(f"Error setting Google Cloud credentials path: {e}")
-    # It's crucial to remove the temp file if we stop here due to an error
-    os.unlink(temp_gcp_key_path)
+    st.error(f"Error setting up Google Cloud credentials: {e}")
     st.stop()
 
 # Get Google Cloud Project ID from secrets
-_GC_PROJECT_ID: Optional[str] = st.secrets.get("GOOGLE_CLOUD_PROJECT")
-if not _GC_PROJECT_ID:
-    st.error("Secret 'GOOGLE_CLOUD_PROJECT' not found. Please add your Google Cloud Project ID to your Streamlit secrets.")
-    # Clean up temp file on exit
-    os.unlink(temp_gcp_key_path)
+try:
+    _GC_PROJECT_ID = st.secrets["GOOGLE_CLOUD_PROJECT"]
+except KeyError:
+    st.error("'GOOGLE_CLOUD_PROJECT' not found in Streamlit secrets. Please add it to your secrets.toml file.")
     st.stop()
 
-# Initialize Google Cloud clients
-# GOOGLE_CLOUD_KEY_PATH is guaranteed to be str here due to previous st.stop()
-translator_client: Optional[translate.TranslationServiceClient] = get_translator_client(cast(str, GOOGLE_CLOUD_KEY_PATH))
+translator_client: Optional[translate.TranslationServiceClient] = get_translator_client(GOOGLE_CLOUD_KEY_PATH)
 if not translator_client:
-    st.warning("Error with Google Cloud Translator client. Translation features may be limited.")
+    st.warning("error with Google Cloud Translator client")
 
-texttospeech_client: Optional[texttospeech.TextToSpeechClient] = get_texttospeech_client(cast(str, GOOGLE_CLOUD_KEY_PATH))
+texttospeech_client: Optional[texttospeech.TextToSpeechClient] = get_texttospeech_client(GOOGLE_CLOUD_KEY_PATH)
 if not texttospeech_client:
-    st.warning("Error with Google Cloud Text-to-Speech client. Audio playback features may be limited.")
+    st.warning("error with Google Cloud Text-to-Speech")
 
-speech_client: Optional[speech.SpeechClient] = get_speech_client(cast(str, GOOGLE_CLOUD_KEY_PATH))
+speech_client: Optional[speech.SpeechClient] = get_speech_client(GOOGLE_CLOUD_KEY_PATH)
 if not speech_client:
     st.warning("Google Cloud Speech-to-Text client could not be initialized. Voice input features (if implemented) will be disabled.")
 
-
-# --- Firebase Service Account Key Handling (using st.secrets) ---
-FIREBASE_SERVICE_ACCOUNT_KEY_PATH: Optional[str] = None
-# Get JSON string from Streamlit secrets
-firebase_sa_key_json_str: Optional[str] = st.secrets.get("FIREBASE_SERVICE_ACCOUNT_KEY")
-
-should_initialize_firebase = True
-
-if not firebase_sa_key_json_str:
-    st.warning("Secret 'FIREBASE_SERVICE_ACCOUNT_KEY_JSON' not found. Firebase features may not be initialized.")
-    should_initialize_firebase = False
-else:
-    temp_firebase_key_path = create_temp_json_file(firebase_sa_key_json_str, "firebase_key_")
-    if not temp_firebase_key_path:
-        should_initialize_firebase = False # Error already reported by create_temp_json_file
-    else:
-        FIREBASE_SERVICE_ACCOUNT_KEY_PATH = temp_firebase_key_path
-
-# Only attempt Firebase initialization if all checks passed
-if should_initialize_firebase and FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
-    try:
-        initialize_firebase_app(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
-        print("--- Firebase Admin SDK initialized successfully. ---")
-    except Exception as e:
-        st.error(f"Failed to initialize Firebase Admin SDK: {e}. Firebase features will be disabled.")
-        print(f"--- Firebase Initialization FAILED: {e} ---")
-        should_initialize_firebase = False # Ensure flag is set to false if initialization fails
-
-# Firebase related functions will implicitly check if `db` is None in forwarding_works.py
-
-
-ALLOWED_LANGUAGES: List[str] = ['en', 'ta', 'te', 'hi']
+ALLOWED_LANGUAGES: List[str] = ['en', 'ta', 'te', 'hi'] 
 DEFAULT_LANGUAGE: Literal['en'] = "en"
 SUPPORTED_LANGUAGES: dict[str, str] = {}
 if not SUPPORTED_LANGUAGES:
-    # _GC_PROJECT_ID is guaranteed to be str here due to previous st.stop()
-    SUPPORTED_LANGUAGES = get_supported_languages(translator_client, cast(str, _GC_PROJECT_ID), allowed_langs=ALLOWED_LANGUAGES)
+    SUPPORTED_LANGUAGES = get_supported_languages(translator_client, _GC_PROJECT_ID, allowed_langs=ALLOWED_LANGUAGES)
 
 def cosine_similarity_manual(vec1, vec2):
     """Calculates cosine similarity between two vectors."""
@@ -178,44 +140,34 @@ Return only the category name: 'Animal Bite-Related' or 'Not Animal Bite-Related
         description="The classified category regarding animal bite relevance."
     )
 
-# Get OpenAI API Key from Streamlit secrets
-openai_api_key: Optional[str] = st.secrets.get("OPENAI_KEY")
-if not openai_api_key:
-    st.error("Secret 'OPENAI_KEY' not found. Please add your OpenAI API Key to your Streamlit secrets.")
-    # Clean up temp files if they exist before stopping
-    if GOOGLE_CLOUD_KEY_PATH and os.path.exists(GOOGLE_CLOUD_KEY_PATH): os.unlink(GOOGLE_CLOUD_KEY_PATH)
-    if FIREBASE_SERVICE_ACCOUNT_KEY_PATH and os.path.exists(FIREBASE_SERVICE_ACCOUNT_KEY_PATH): os.unlink(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
+# Get OpenAI API key from secrets
+try:
+    openai_api_key_raw = st.secrets["OPENAI_KEY"]
+except KeyError:
+    st.error("'OPENAI_KEY' not found in Streamlit secrets. Please add it to your secrets.toml file.")
     st.stop()
 
-# Fix for Pylance: Ensure openai_api_key is treated as str before passing to SecretStr
-# We can safely cast here because st.stop() ensures it's not None if this line is reached.
-openai_api_key_str: str = cast(str, openai_api_key)
-openai_api_key_secret = SecretStr(openai_api_key_str)
+openai_api_key_secret = SecretStr(openai_api_key_raw)
 
 embeddings_model = OpenAIEmbeddings(model="text-embedding-3-large", api_key=openai_api_key_secret)
 llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0, api_key=openai_api_key_secret)
 smaller_llm = ChatOpenAI(temperature=0, model="gpt-4o-mini", api_key=openai_api_key_secret)
 larger_llm = ChatOpenAI(temperature=0, model="gpt-4o", api_key=openai_api_key_secret)
 
-# --- MongoDB Initialization (using st.secrets) ---
-mongodb_uri: Optional[str] = st.secrets.get("MONGODB_URI")
-if not mongodb_uri:
-    st.error("Secret 'MONGODB_URI' not found. Please add your MongoDB Connection URI to your Streamlit secrets.")
-    # Clean up temp files if they exist before stopping
-    if GOOGLE_CLOUD_KEY_PATH and os.path.exists(GOOGLE_CLOUD_KEY_PATH): os.unlink(GOOGLE_CLOUD_KEY_PATH)
-    if FIREBASE_SERVICE_ACCOUNT_KEY_PATH and os.path.exists(FIREBASE_SERVICE_ACCOUNT_KEY_PATH): os.unlink(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
+# --- MongoDB Initialization ---
+try:
+    mongodb_uri = st.secrets["MONGODB_URI"]
+except KeyError:
+    st.error("'MONGODB_URI' not found in Streamlit secrets. Please add it to your secrets.toml file.")
     st.stop()
 
 try:
-    client = MongoClient(cast(str, mongodb_uri))
-    db_mongo = client["pdf_file"] # Renamed to db_mongo to avoid conflict with Firebase's 'db'
-    collection = db_mongo["animal_bites"]
-    _ = db_mongo.list_collection_names() # Test connection
+    client = MongoClient(mongodb_uri)
+    db = client["pdf_file"]
+    collection = db["animal_bites"]
+    _ = db.list_collection_names() # Test connection
 except Exception as e:
-    st.error(f"Failed to connect to MongoDB: {e}. Please check your MONGODB_URI secret and ensure MongoDB is accessible.")
-    # Clean up temp files if they exist before stopping
-    if GOOGLE_CLOUD_KEY_PATH and os.path.exists(GOOGLE_CLOUD_KEY_PATH): os.unlink(GOOGLE_CLOUD_KEY_PATH)
-    if FIREBASE_SERVICE_ACCOUNT_KEY_PATH and os.path.exists(FIREBASE_SERVICE_ACCOUNT_KEY_PATH): os.unlink(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
+    st.error(f"Failed to connect to MongoDB: {e}. Please check your MONGODB_URI and ensure MongoDB is accessible.")
     st.stop()
 
 if "chat_history" not in st.session_state:
@@ -231,8 +183,7 @@ def process_input():
 
     current_selected_language: str = str(st.session_state.selected_language) if st.session_state.selected_language is not None else DEFAULT_LANGUAGE
 
-    # Translate user input to English for LLM processing
-    user_input_english_raw = translate_text(translator_client, user_input_original, DEFAULT_LANGUAGE, current_selected_language, cast(str, _GC_PROJECT_ID)) # type: ignore
+    user_input_english_raw = translate_text(translator_client, user_input_original, DEFAULT_LANGUAGE, current_selected_language, _GC_PROJECT_ID) # type: ignore
     user_input_english: str = user_input_english_raw if user_input_english_raw else user_input_original
     if not user_input_english.strip():
         user_input_english = user_input_original
@@ -300,21 +251,21 @@ latest_user_input:{user_input_english}"""
 
                 if relevance_category == 'Not Animal Bite-Related':
                     bot_response_english = "Sorry, but I specialize in answering questions related to animal bites.\
-                                        I may not be able to help with your query, but if you have any questions about animal bites, \
-                                        their effects, treatment, or prevention, I'd be happy to assist!"
-                else:
+                                    I may not be able to help with your query, but if you have any questions about animal bites, \
+                                    their effects, treatment, or prevention, I'd be happy to assist!"
+                else: 
                     bot_response_english = "I am unable to answer your question at the moment. The Doctor has been notified, please check back in a few days."
 
                     try:
-                        # Pass the current timestamp for save_unanswered_question
-                        save_unanswered_question(user_input_english, datetime.datetime.now())
+                        from forwarding_works import save_unanswered_question
+                        save_unanswered_question(user_input_english)
                     except Exception as e:
                         st.error(f"Error forwarding question to doctor: {e}")
         except Exception as e:
             st.error(f"Error during subject-specific processing: {e}")
             bot_response_english = "An internal error occurred while processing your request. Please try again."
 
-    else:
+    else: 
         try:
             bot_response_english_result = llm.invoke(f"""system:you are a friendly chatbot that specializes in medical questions related to animal bites.
                                 question: {user_input_english}""").content
@@ -323,19 +274,16 @@ latest_user_input:{user_input_english}"""
             st.error(f"Error during casual greeting processing: {e}")
             bot_response_english = "An internal error occurred while generating a greeting. Please try again."
 
-    # Translate bot response back to the user's selected language
-    bot_response = translate_text(translator_client, bot_response_english, current_selected_language, DEFAULT_LANGUAGE, cast(str, _GC_PROJECT_ID)) # type: ignore
+    bot_response = translate_text(translator_client, bot_response_english, current_selected_language, DEFAULT_LANGUAGE, _GC_PROJECT_ID) # type: ignore
 
-    # Ensure bot_response_english is not None before saving to save_user_interaction
-    final_bot_response_english = bot_response_english if bot_response_english is not None else ""
     try:
-        # Check if Firebase was initialized before attempting to save interaction
-        if should_initialize_firebase:
-            save_user_interaction(user_input_english, final_bot_response_english, st.session_state.get('session_id', None))
-        else:
-            print("Firebase not initialized, skipping user interaction save.")
+        from forwarding_works import save_user_interaction
+        # Get user session ID if available (you can modify this based on your session management)
+        user_session_id = getattr(st.session_state, 'session_id', None)
+        save_user_interaction(user_input_english, bot_response_english, user_session_id)
     except Exception as e:
-        st.error(f"Error saving user interaction to Firebase: {e}")
+        st.error(f"Error saving user interaction: {e}")
+
 
     st.session_state.chat_history.append((user_input_original, bot_response))
     st.session_state.user_input = ""
@@ -426,7 +374,7 @@ def main():
     with chat_container:
         display_chat()
 
-    translated_placeholder_raw = translate_text(translator_client, "Enter your message here", st.session_state.selected_language, DEFAULT_LANGUAGE, cast(str, _GC_PROJECT_ID)) # type: ignore
+    translated_placeholder_raw = translate_text(translator_client, "Enter your message here", st.session_state.selected_language, DEFAULT_LANGUAGE, _GC_PROJECT_ID) # type: ignore
     translated_placeholder: str = translated_placeholder_raw if translated_placeholder_raw else "Enter your message here"
 
     st.text_input(
@@ -435,13 +383,6 @@ def main():
         placeholder=translated_placeholder,
         on_change=process_input
     )
-
-    # Clean up temporary files on app shutdown/rerun for good practice
-    if GOOGLE_CLOUD_KEY_PATH and os.path.exists(GOOGLE_CLOUD_KEY_PATH):
-        os.unlink(GOOGLE_CLOUD_KEY_PATH)
-    if FIREBASE_SERVICE_ACCOUNT_KEY_PATH and os.path.exists(FIREBASE_SERVICE_ACCOUNT_KEY_PATH):
-        os.unlink(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
-
 
 if __name__ == "__main__":
     main()
