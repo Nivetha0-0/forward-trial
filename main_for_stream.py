@@ -1,7 +1,5 @@
 import streamlit as st
 from streamlit_chat import message
-import streamlit as st
-from streamlit_chat import message
 import os
 import numpy as np
 import hashlib
@@ -19,73 +17,16 @@ from google.cloud import texttospeech
 from google.cloud import speech
 from tran_works import get_translator_client, get_texttospeech_client, get_speech_client, translate_text, get_supported_languages
 
-# Remove dotenv import and load_dotenv() call
-# from dotenv import load_dotenv
-# load_dotenv()
-
-GOOGLE_CLOUD_KEY_PATH: Optional[str] = None 
-
-# Get the Google Cloud credentials from Streamlit secrets
-try:
-    # Check if GOOGLE_APPLICATION_CREDENTIALS path is provided in secrets
-    if "GOOGLE_APPLICATION_CREDENTIALS" in st.secrets:
-        gcp_key_file_path = st.secrets["GOOGLE_APPLICATION_CREDENTIALS"]
-        
-        if not os.path.exists(gcp_key_file_path):
-            st.error(f"Google Cloud credentials file not found at: {gcp_key_file_path}")
-            st.stop()
-        
-        # Read the JSON file content
-        with open(gcp_key_file_path, 'r') as file:
-            gcp_sa_key_json_content = file.read()
-        
-        # Create a temporary file with the JSON content
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
-            temp_file.write(gcp_sa_key_json_content)
-            temp_file.flush() 
-            GOOGLE_CLOUD_KEY_PATH = temp_file.name
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_CLOUD_KEY_PATH
-    
-    # Check if Firebase service account key is provided (alternative)
-    elif "FIREBASE_SERVICE_ACCOUNT_KEY" in st.secrets:
-        firebase_sa_key_json_content = st.secrets["FIREBASE_SERVICE_ACCOUNT_KEY"]
-        
-        # Create a temporary file with the JSON content
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
-            # If it's stored as a string, use it directly
-            if isinstance(firebase_sa_key_json_content, str):
-                temp_file.write(firebase_sa_key_json_content)
-            else:
-                # If it's stored as a dict/object, convert to JSON string
-                temp_file.write(json.dumps(firebase_sa_key_json_content))
-            temp_file.flush() 
-            GOOGLE_CLOUD_KEY_PATH = temp_file.name
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_CLOUD_KEY_PATH
-    
-    else:
-        st.error("Google Cloud credentials not found in Streamlit secrets. Please add either 'GOOGLE_APPLICATION_CREDENTIALS' (file path) or 'FIREBASE_SERVICE_ACCOUNT_KEY' (JSON content) to your secrets.toml file.")
-        st.stop()
-
-except Exception as e:
-    st.error(f"Error setting up Google Cloud credentials: {e}")
-    st.stop()
-
-# Get Google Cloud Project ID from secrets
-try:
-    _GC_PROJECT_ID = st.secrets["GOOGLE_CLOUD_PROJECT"]
-except KeyError:
-    st.error("'GOOGLE_CLOUD_PROJECT' not found in Streamlit secrets. Please add it to your secrets.toml file.")
-    st.stop()
-
-translator_client: Optional[translate.TranslationServiceClient] = get_translator_client(GOOGLE_CLOUD_KEY_PATH)
+# Initialize Google Cloud clients
+translator_client: Optional[translate.TranslationServiceClient] = get_translator_client()
 if not translator_client:
-    st.warning("error with Google Cloud Translator client")
+    st.warning("Error with Google Cloud Translator client")
 
-texttospeech_client: Optional[texttospeech.TextToSpeechClient] = get_texttospeech_client(GOOGLE_CLOUD_KEY_PATH)
+texttospeech_client: Optional[texttospeech.TextToSpeechClient] = get_texttospeech_client()
 if not texttospeech_client:
-    st.warning("error with Google Cloud Text-to-Speech")
+    st.warning("Error with Google Cloud Text-to-Speech")
 
-speech_client: Optional[speech.SpeechClient] = get_speech_client(GOOGLE_CLOUD_KEY_PATH)
+speech_client: Optional[speech.SpeechClient] = get_speech_client()
 if not speech_client:
     st.warning("Google Cloud Speech-to-Text client could not be initialized. Voice input features (if implemented) will be disabled.")
 
@@ -93,7 +34,7 @@ ALLOWED_LANGUAGES: List[str] = ['en', 'ta', 'te', 'hi']
 DEFAULT_LANGUAGE: Literal['en'] = "en"
 SUPPORTED_LANGUAGES: dict[str, str] = {}
 if not SUPPORTED_LANGUAGES:
-    SUPPORTED_LANGUAGES = get_supported_languages(translator_client, _GC_PROJECT_ID, allowed_langs=ALLOWED_LANGUAGES)
+    SUPPORTED_LANGUAGES = get_supported_languages(translator_client, allowed_langs=ALLOWED_LANGUAGES)
 
 def cosine_similarity_manual(vec1, vec2):
     """Calculates cosine similarity between two vectors."""
@@ -140,29 +81,17 @@ Return only the category name: 'Animal Bite-Related' or 'Not Animal Bite-Related
         description="The classified category regarding animal bite relevance."
     )
 
-# Get OpenAI API key from secrets
-try:
-    openai_api_key_raw = st.secrets["OPENAI_KEY"]
-except KeyError:
-    st.error("'OPENAI_KEY' not found in Streamlit secrets. Please add it to your secrets.toml file.")
-    st.stop()
-
-openai_api_key_secret = SecretStr(openai_api_key_raw)
+# Initialize OpenAI with Streamlit secrets
+openai_api_key_secret = SecretStr(st.secrets["OPENAI_KEY"])
 
 embeddings_model = OpenAIEmbeddings(model="text-embedding-3-large", api_key=openai_api_key_secret)
 llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0, api_key=openai_api_key_secret)
 smaller_llm = ChatOpenAI(temperature=0, model="gpt-4o-mini", api_key=openai_api_key_secret)
 larger_llm = ChatOpenAI(temperature=0, model="gpt-4o", api_key=openai_api_key_secret)
 
-# --- MongoDB Initialization ---
+# Initialize MongoDB with Streamlit secrets
 try:
-    mongodb_uri = st.secrets["MONGODB_URI"]
-except KeyError:
-    st.error("'MONGODB_URI' not found in Streamlit secrets. Please add it to your secrets.toml file.")
-    st.stop()
-
-try:
-    client = MongoClient(mongodb_uri)
+    client = MongoClient(st.secrets["MONGODB_URI"])
     db = client["pdf_file"]
     collection = db["animal_bites"]
     _ = db.list_collection_names() # Test connection
@@ -183,7 +112,7 @@ def process_input():
 
     current_selected_language: str = str(st.session_state.selected_language) if st.session_state.selected_language is not None else DEFAULT_LANGUAGE
 
-    user_input_english_raw = translate_text(translator_client, user_input_original, DEFAULT_LANGUAGE, current_selected_language, _GC_PROJECT_ID) # type: ignore
+    user_input_english_raw = translate_text(translator_client, user_input_original, DEFAULT_LANGUAGE, current_selected_language)
     user_input_english: str = user_input_english_raw if user_input_english_raw else user_input_original
     if not user_input_english.strip():
         user_input_english = user_input_original
@@ -274,7 +203,7 @@ latest_user_input:{user_input_english}"""
             st.error(f"Error during casual greeting processing: {e}")
             bot_response_english = "An internal error occurred while generating a greeting. Please try again."
 
-    bot_response = translate_text(translator_client, bot_response_english, current_selected_language, DEFAULT_LANGUAGE, _GC_PROJECT_ID) # type: ignore
+    bot_response = translate_text(translator_client, bot_response_english, current_selected_language, DEFAULT_LANGUAGE)
 
     try:
         from forwarding_works import save_user_interaction
@@ -284,10 +213,8 @@ latest_user_input:{user_input_english}"""
     except Exception as e:
         st.error(f"Error saving user interaction: {e}")
 
-
     st.session_state.chat_history.append((user_input_original, bot_response))
     st.session_state.user_input = ""
-
 
 def display_chat():
     os.makedirs("tts_audio", exist_ok=True)
@@ -335,12 +262,10 @@ def display_chat():
                 audio_bytes = audio_file.read()
                 st.audio(audio_bytes, format="audio/mp3", start_time=0)
 
-
 def set_language():
     st.session_state.selected_language = st.session_state.lang_selector
     st.session_state.chat_history = []
     st.rerun()
-
 
 def main():
     st.set_page_config(page_title="Multilingual Animal Bites Chatbot", layout="centered")
@@ -374,7 +299,7 @@ def main():
     with chat_container:
         display_chat()
 
-    translated_placeholder_raw = translate_text(translator_client, "Enter your message here", st.session_state.selected_language, DEFAULT_LANGUAGE, _GC_PROJECT_ID) # type: ignore
+    translated_placeholder_raw = translate_text(translator_client, "Enter your message here", st.session_state.selected_language, DEFAULT_LANGUAGE)
     translated_placeholder: str = translated_placeholder_raw if translated_placeholder_raw else "Enter your message here"
 
     st.text_input(
