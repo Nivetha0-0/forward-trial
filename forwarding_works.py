@@ -2,13 +2,51 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime
-
-firebase_config = "animal-bites.json"
+import streamlit as st
+import json
+import tempfile
+import os
 
 # Initialize Firebase if not already initialized
 if not firebase_admin._apps:
-    cred = credentials.Certificate(firebase_config)
-    firebase_admin.initialize_app(cred)
+    try:
+        # Check if Firebase service account key is in Streamlit secrets
+        if "FIREBASE_SERVICE_ACCOUNT_KEY" in st.secrets:
+            firebase_sa_key_json_content = st.secrets["FIREBASE_SERVICE_ACCOUNT_KEY"]
+            
+            # Create a temporary file with the JSON content
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
+                # If it's stored as a string, use it directly
+                if isinstance(firebase_sa_key_json_content, str):
+                    temp_file.write(firebase_sa_key_json_content)
+                else:
+                    # If it's stored as a dict/object, convert to JSON string
+                    temp_file.write(json.dumps(firebase_sa_key_json_content))
+                temp_file.flush()
+                
+                # Initialize Firebase with the temporary file
+                cred = credentials.Certificate(temp_file.name)
+                firebase_admin.initialize_app(cred)
+                
+                # Clean up the temporary file
+                os.unlink(temp_file.name)
+        
+        # Fallback: Check if Google Application Credentials path is provided
+        elif "GOOGLE_APPLICATION_CREDENTIALS" in st.secrets:
+            firebase_config_path = st.secrets["GOOGLE_APPLICATION_CREDENTIALS"]
+            if os.path.exists(firebase_config_path):
+                cred = credentials.Certificate(firebase_config_path)
+                firebase_admin.initialize_app(cred)
+            else:
+                raise FileNotFoundError(f"Firebase config file not found at: {firebase_config_path}")
+        
+        else:
+            raise ValueError("Firebase credentials not found in Streamlit secrets. Please add either 'FIREBASE_SERVICE_ACCOUNT_KEY' (JSON content) or 'GOOGLE_APPLICATION_CREDENTIALS' (file path) to your secrets.")
+            
+    except Exception as e:
+        print(f"❌ Error initializing Firebase: {str(e)}")
+        # Re-raise the exception to prevent the app from continuing with invalid Firebase setup
+        raise e
 
 db = firestore.client()
 
