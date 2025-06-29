@@ -43,7 +43,9 @@ def get_firebase_config():
 
 def initialize_firebase():
     """Initialize Firebase with proper error handling"""
+    # Check if Firebase is already initialized
     if firebase_admin._apps:
+        print("ℹ️  Firebase already initialized, using existing app")
         return firestore.client()
     
     try:
@@ -70,8 +72,12 @@ def initialize_firebase():
         print(f"❌ Error initializing Firebase: {str(e)}")
         raise
 
-# Initialize Firebase
-db = initialize_firebase()
+def get_db():
+    """Get Firestore client, initializing Firebase if needed"""
+    return initialize_firebase()
+
+# Get database client (will initialize if needed)
+db = get_db()
 
 def save_unanswered_question(question_english):
     """
