@@ -6,11 +6,6 @@ import json
 from typing import Optional
 
 def get_firebase_config():
-    """
-    Get Firebase configuration from environment variables.
-    Uses FIREBASE_SERVICE_ACCOUNT_KEY and GOOGLE_CLOUD_PROJECT.
-    """
-    # Method 1: Use FIREBASE_SERVICE_ACCOUNT_KEY (JSON string)
     firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
     if firebase_key:
         try:
@@ -18,13 +13,11 @@ def get_firebase_config():
         except json.JSONDecodeError as e:
             print(f"❌ Error parsing FIREBASE_SERVICE_ACCOUNT_KEY: {str(e)}")
             raise
-    
-    # Method 2: Use GOOGLE_APPLICATION_CREDENTIALS (file path)
+
     google_creds_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
     if google_creds_path and os.path.exists(google_creds_path):
         return google_creds_path
-    
-    # Fallback: Check for project ID at least
+        
     project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
     if not project_id:
         raise ValueError(
@@ -42,8 +35,6 @@ def get_firebase_config():
     )
 
 def initialize_firebase():
-    """Initialize Firebase with proper error handling"""
-    # Check if Firebase is already initialized
     if firebase_admin._apps:
         print("ℹ️  Firebase already initialized, using existing app")
         return firestore.client()
@@ -52,13 +43,10 @@ def initialize_firebase():
         firebase_config = get_firebase_config()
         
         if isinstance(firebase_config, str):
-            # File path
             cred = credentials.Certificate(firebase_config)
         else:
-            # Dictionary config
             cred = credentials.Certificate(firebase_config)
-        
-        # Initialize with project ID if available    
+       
         project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
         if project_id:
             firebase_admin.initialize_app(cred, {'projectId': project_id})
@@ -73,35 +61,17 @@ def initialize_firebase():
         raise
 
 def get_db():
-    """Get Firestore client, initializing Firebase if needed"""
     return initialize_firebase()
-
-# Get database client (will initialize if needed)
 db = get_db()
 
 def save_unanswered_question(question_english):
-    """
-    Save unanswered question to Firebase for doctor review
-    
-    Args:
-        question_english (str): The user's question in English
-    """
-    try:
-        # Reference to the doctor document
+    try
         doctor_doc_ref = db.collection("DOCTOR").document("1")
-        
-        # Get current data
         doc = doctor_doc_ref.get()
         data = doc.to_dict() if doc.exists else {}
-        
-        # Get existing questions list
         qn_list = data.get("qn", [])
-        
-        # Add new question if not already present
         if question_english not in qn_list:
             qn_list.append(question_english)
-            
-            # Update the document
             doctor_doc_ref.set({
                 "qn": qn_list
             }, merge=True)
@@ -115,16 +85,7 @@ def save_unanswered_question(question_english):
         raise e
 
 def save_user_interaction(question_english, answer_english, user_session_id=None):
-    """
-    Save user question and bot response to Firebase
-    
-    Args:
-        question_english (str): User's question in English
-        answer_english (str): Bot's answer in English
-        user_session_id (str, optional): User session identifier
-    """
     try:
-        # Create document data
         interaction_data = {
             "question": question_english,
             "answer": answer_english,
@@ -133,7 +94,6 @@ def save_user_interaction(question_english, answer_english, user_session_id=None
             "status": "answered"
         }
         
-        # Check if this should be marked as unanswered
         unanswered_indicators = [
             "doctor has been notified",
             "doctor will be notified", 
@@ -143,8 +103,7 @@ def save_user_interaction(question_english, answer_english, user_session_id=None
         
         if any(indicator in answer_english.lower() for indicator in unanswered_indicators):
             interaction_data["status"] = "forwarded_to_doctor"
-        
-        # Add to user collection
+
         db.collection("user").add(interaction_data)
         
         print(f"✅ User interaction saved: Q: {question_english[:50]}...")
