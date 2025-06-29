@@ -48,7 +48,7 @@ def save_unanswered_question(question_text: str, timestamp: datetime.datetime):
         return
 
     try:
-        doc_ref = db.collection('unanswered_questions').document()
+        doc_ref = db.collection('DOCTOR').document()
         doc_ref.set({
             'question': question_text,
             'timestamp': timestamp
