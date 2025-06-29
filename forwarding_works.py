@@ -1,88 +1,87 @@
+# forwarding.py
 import firebase_admin
-from firebase_admin import credentials
-from firebase_admin import firestore # This imports the firestore module
+from firebase_admin import credentials, firestore
+from datetime import datetime
 
-# --- Imports specifically for Pylance type hinting (only for Client, which is usually stable) ---
-# For the Firestore Client type, this import is generally stable for Pylance.
-from google.cloud.firestore_v1.client import Client as FirestoreClientType
-# --- End Pylance type hinting imports ---
+firebase_config = "animal-bites.json"
 
-# Removed: from google.cloud.firestore_v1.field_value import FieldValue as FirestoreFieldValueType
-# This import path seems to be causing issues with Pylance's resolution.
+# Initialize Firebase if not already initialized
+if not firebase_admin._apps:
+    cred = credentials.Certificate(firebase_config)
+    firebase_admin.initialize_app(cred)
 
-import datetime
-from typing import Optional, Any
+db = firestore.client()
 
-# Global variable to hold the Firestore client
-# Use the explicitly imported type for Pylance. Pylance should now recognize 'db'.
-db: Optional[FirestoreClientType] = None
-
-def initialize_firebase_app(service_account_key_path: str):
+def save_unanswered_question(question_english):
     """
-    Initializes the Firebase Admin SDK.
-    Expects the path to the service account JSON file.
+    Save unanswered question to Firebase for doctor review
+    
+    Args:
+        question_english (str): The user's question in English
     """
-    global db
-    if not firebase_admin._apps: # Check if app is already initialized
-        try:
-            cred = credentials.Certificate(service_account_key_path)
-            firebase_admin.initialize_app(cred)
-            db = firestore.client()
-            print(f"Firebase Admin SDK initialized successfully from path: {service_account_key_path}")
-        except Exception as e:
-            print(f"Error initializing Firebase Admin SDK in forwarding_works.py: {e}")
-            raise
-    else:
-        if db is None:
-            db = firestore.client()
-        print("Firebase Admin SDK already initialized.")
-
-
-def save_unanswered_question(question_text: str, timestamp: datetime.datetime):
-    """
-    Saves an unanswered question to Firestore.
-    Requires Firebase to be initialized.
-    """
-    if db is None:
-        print("Firestore client not initialized. Cannot save unanswered question.")
-        return
-
     try:
-        doc_ref = db.collection('DOCTOR').document()
-        doc_ref.set({
-            'question': question_text,
-            'timestamp': timestamp
-        })
-        print(f"Unanswered question saved: {question_text}")
+        # Reference to the doctor document
+        doctor_doc_ref = db.collection("DOCTOR").document("1")
+        
+        # Get current data
+        doc = doctor_doc_ref.get()
+        data = doc.to_dict() if doc.exists else {}
+        
+        # Get existing questions list
+        qn_list = data.get("qn", [])
+        
+        # Add new question if not already present
+        if question_english not in qn_list:
+            qn_list.append(question_english)
+            
+            # Update the document
+            doctor_doc_ref.set({
+                "qn": qn_list
+            }, merge=True)
+            
+            print(f"✅ Unanswered question saved for doctor review: {question_english}")
+        else:
+            print(f"ℹ️  Question already exists in unanswered list: {question_english}")
+            
     except Exception as e:
-        print(f"Error saving unanswered question to Firestore: {e}")
+        print(f"❌ Error saving unanswered question: {str(e)}")
+        raise e
 
-def save_user_interaction(user_input_english: str, bot_response_english: str, session_id: Optional[str] = None):
+def save_user_interaction(question_english, answer_english, user_session_id=None):
     """
-    Saves a user interaction (question and bot response) to Firestore.
-    Requires Firebase to be initialized.
+    Save user question and bot response to Firebase
+    
+    Args:
+        question_english (str): User's question in English
+        answer_english (str): Bot's answer in English
+        user_session_id (str, optional): User session identifier
     """
-    if db is None:
-        print("Firestore client not initialized. Cannot save user interaction.")
-        return
-
     try:
-        if session_id is None:
-            session_id = f"session_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-
-        doc_ref = db.collection('user').document()
-        doc_ref.set({
-            'session_id': session_id,
-            'user_input': user_input_english,
-            'bot_response': bot_response_english,
-            # This line works at runtime, but Pylance might complain.
-            # Adding '# type: ignore' tells Pylance to suppress the warning for this line.
-            'timestamp': firestore.FieldValue.server_timestamp() # type: ignore
-        })
-        print(f"User interaction saved: Session {session_id}, User: {user_input_english}")
+        # Create document data
+        interaction_data = {
+            "question": question_english,
+            "answer": answer_english,
+            "timestamp": datetime.now(),
+            "session_id": user_session_id or "anonymous",
+            "status": "answered"
+        }
+        
+        # Check if this should be marked as unanswered
+        unanswered_indicators = [
+            "doctor has been notified",
+            "doctor will be notified", 
+            "check back in a few days",
+            "unable to answer your question"
+        ]
+        
+        if any(indicator in answer_english.lower() for indicator in unanswered_indicators):
+            interaction_data["status"] = "forwarded_to_doctor"
+        
+        # Add to user collection
+        db.collection("user").add(interaction_data)
+        
+        print(f"✅ User interaction saved: Q: {question_english[:50]}...")
+        
     except Exception as e:
-        print(f"Error saving user interaction to Firestore: {e}")
-
-def get_firestore_client():
-    """Returns the initialized Firestore client."""
-    return db
+        print(f"❌ Error saving user interaction: {str(e)}")
+        raise e
