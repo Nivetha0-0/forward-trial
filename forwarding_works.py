@@ -70,7 +70,7 @@ def save_user_interaction(user_input_english: str, bot_response_english: str, se
         if session_id is None:
             session_id = f"session_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-        doc_ref = db.collection('user_interactions').document()
+        doc_ref = db.collection('user').document()
         doc_ref.set({
             'session_id': session_id,
             'user_input': user_input_english,
