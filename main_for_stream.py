@@ -206,23 +206,24 @@ latest_user_input:{user_input_english}"""
         from forwarding_works import save_user_interaction
         user_session_id = getattr(st.session_state, 'session_id', None)
     
-        # Define excluded bot responses
-        fallback_responses = [
-            "Sorry, but I specialize in answering questions related to animal bites.\
+        # Responses that should NOT be saved
+        fallback_1 = "Sorry, but I specialize in answering questions related to animal bites.\
                                         I may not be able to help with your query, but if you have any questions about animal bites, \
-                                        their effects, treatment, or prevention, I'd be happy to assist!",
-            "I am unable to answer your question at the moment. The Doctor has been notified, please check back in a few days."
-        ]
-
-    # Only save interaction if it's not a casual greeting or fallback response
-        if classification_category != 'Casual Greeting' and bot_response_english not in fallback_responses:
+                                        their effects, treatment, or prevention, I'd be happy to assist!"
+        fallback_2 = "I am unable to answer your question at the moment. The Doctor has been notified, please check back in a few days."
+    
+        # Clean up whitespace from responses for accurate comparison
+        cleaned_response = bot_response_english.strip()
+    
+        # ✅ Save only if not a casual greeting AND not a fallback response
+        if classification_category != 'Casual Greeting' and cleaned_response not in [fallback_1.strip(), fallback_2.strip()]:
             save_user_interaction(user_input_english, bot_response_english, user_session_id)
     
     except Exception as e:
         st.error(f"Error saving user interaction: {e}")
     
-        st.session_state.chat_history.append((user_input_original, bot_response))
-        st.session_state.user_input = ""
+    st.session_state.chat_history.append((user_input_original, bot_response))
+    st.session_state.user_input = ""
 
 def display_chat():
     os.makedirs("tts_audio", exist_ok=True)
