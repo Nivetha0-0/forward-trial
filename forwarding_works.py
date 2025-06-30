@@ -65,7 +65,7 @@ def get_db():
 db = get_db()
 
 def save_unanswered_question(question_english):
-    try
+    try:
         doctor_doc_ref = db.collection("DOCTOR").document("1")
         doc = doctor_doc_ref.get()
         data = doc.to_dict() if doc.exists else {}
