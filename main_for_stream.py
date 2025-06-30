@@ -204,14 +204,25 @@ latest_user_input:{user_input_english}"""
 
     try:
         from forwarding_works import save_user_interaction
-        # Get user session ID if available (you can modify this based on your session management)
         user_session_id = getattr(st.session_state, 'session_id', None)
-        save_user_interaction(user_input_english, bot_response_english, user_session_id)
+    
+        # Define excluded bot responses
+        fallback_responses = [
+            "Sorry, but I specialize in answering questions related to animal bites.\
+                                        I may not be able to help with your query, but if you have any questions about animal bites, \
+                                        their effects, treatment, or prevention, I'd be happy to assist!",
+            "I am unable to answer your question at the moment. The Doctor has been notified, please check back in a few days."
+        ]
+
+    # Only save interaction if it's not a casual greeting or fallback response
+        if classification_category != 'Casual Greeting' and bot_response_english not in fallback_responses:
+            save_user_interaction(user_input_english, bot_response_english, user_session_id)
+    
     except Exception as e:
         st.error(f"Error saving user interaction: {e}")
-
-    st.session_state.chat_history.append((user_input_original, bot_response))
-    st.session_state.user_input = ""
+    
+        st.session_state.chat_history.append((user_input_original, bot_response))
+        st.session_state.user_input = ""
 
 def display_chat():
     os.makedirs("tts_audio", exist_ok=True)
