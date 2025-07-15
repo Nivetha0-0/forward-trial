@@ -4,6 +4,7 @@ python-dotenv
 langchain-openai
 langchain-core
 pymongo
+sklearn
 numpy
 pydantic
 google-cloud-translate
