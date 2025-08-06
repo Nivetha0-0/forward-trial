@@ -36,8 +36,9 @@ def initialize_firebase():
         # ✅ Only initialize with credential — let SDK infer project ID
         firebase_admin.initialize_app(cred)
 
-        print("✅ Firebase initialized successfully")
-        return firestore.client()
+        db = firestore.client()
+        print(f"🔍 Connected to project: {firebase_admin.get_app().project_id}")  # 👈 DEBUG LINE
+        return db
 
     except Exception as e:
         print(f"❌ Error initializing Firebase: {str(e)}")
@@ -95,3 +96,4 @@ def save_user_interaction(question_english, answer_english, user_session_id=None
     except Exception as e:
         print(f"❌ Error saving user interaction: {str(e)}")
         raise e
+
