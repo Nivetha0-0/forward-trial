@@ -3,8 +3,14 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 import os
 import json
+from typing import Optional
+import streamlit as st  # ✅ Needed to access Streamlit secrets
 
+# ✅ Use the Firebase service account key from Streamlit secrets (already set)
 def get_firebase_config():
+    if "FIREBASE_SERVICE_ACCOUNT_KEY" in st.secrets:
+        return dict(st.secrets["FIREBASE_SERVICE_ACCOUNT_KEY"])
+
     firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
     if firebase_key:
         try:
@@ -18,27 +24,32 @@ def get_firebase_config():
         return google_creds_path
 
     raise ValueError(
-        "Firebase credentials not found. Please set one of:\n"
-        "- FIREBASE_SERVICE_ACCOUNT_KEY (JSON string of service account key)\n"
-        "- GOOGLE_APPLICATION_CREDENTIALS (path to service account key file)"
+        "Firebase configuration not found. Please set one of:\n"
+        "1. FIREBASE_SERVICE_ACCOUNT_KEY (in Streamlit secrets or as env var)\n"
+        "2. GOOGLE_APPLICATION_CREDENTIALS (path to service account key file)"
     )
 
+# ✅ Initialize Firebase WITHOUT overriding projectId manually
 def initialize_firebase():
     if firebase_admin._apps:
-        print("ℹ️  Firebase already initialized, using existing app")
+        print("ℹ️ Firebase already initialized, using existing app")
         return firestore.client()
 
     try:
         firebase_config = get_firebase_config()
 
-        cred = credentials.Certificate(firebase_config)
-        
-        # ✅ Only initialize with credential — let SDK infer project ID
+        if isinstance(firebase_config, str):
+            cred = credentials.Certificate(firebase_config)
+        else:
+            cred = credentials.Certificate(firebase_config)
+
+        # ✅ Do NOT manually pass projectId – this was causing the bug
         firebase_admin.initialize_app(cred)
 
-        db = firestore.client()
-        print(f"🔍 Connected to project: {firebase_admin.get_app().project_id}")  # 👈 DEBUG LINE
-        return db
+        # ✅ DEBUG project ID to confirm correct connection
+        print(f"✅ Firebase initialized successfully")
+        print(f"🔍 Connected to project: {firebase_admin.get_app().project_id}")
+        return firestore.client()
 
     except Exception as e:
         print(f"❌ Error initializing Firebase: {str(e)}")
@@ -63,7 +74,7 @@ def save_unanswered_question(question_english):
 
             print(f"✅ Unanswered question saved for doctor review: {question_english}")
         else:
-            print(f"ℹ️  Question already exists in unanswered list: {question_english}")
+            print(f"ℹ️ Question already exists in unanswered list: {question_english}")
 
     except Exception as e:
         print(f"❌ Error saving unanswered question: {str(e)}")
@@ -96,4 +107,3 @@ def save_user_interaction(question_english, answer_english, user_session_id=None
     except Exception as e:
         print(f"❌ Error saving user interaction: {str(e)}")
         raise e
-
